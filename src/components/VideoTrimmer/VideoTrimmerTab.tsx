@@ -40,6 +40,7 @@ export const VideoTrimmerTab: React.FC = () => {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const timelineRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     return () => {
@@ -69,15 +70,21 @@ export const VideoTrimmerTab: React.FC = () => {
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     const dur = e.currentTarget.duration || 10;
     setDuration(dur);
-    setEndTime(Math.min(dur, Math.max(1, dur * 0.5)));
+    // By default, select the entire video (from 0 to duration)
+    setStartTime(0);
+    setEndTime(dur);
   };
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
-      setCurrentTime(videoRef.current.currentTime);
-      // Auto loop within trim region during preview
-      if (videoRef.current.currentTime >= endTime && isPlaying) {
+      const curr = videoRef.current.currentTime;
+      setCurrentTime(curr);
+      // Auto pause or loop at end of selection when playing preview
+      if (curr >= endTime && isPlaying) {
+        videoRef.current.pause();
+        setIsPlaying(false);
         videoRef.current.currentTime = startTime;
+        setCurrentTime(startTime);
       }
     }
   };
@@ -90,22 +97,77 @@ export const VideoTrimmerTab: React.FC = () => {
     } else {
       if (videoRef.current.currentTime < startTime || videoRef.current.currentTime >= endTime) {
         videoRef.current.currentTime = startTime;
+        setCurrentTime(startTime);
       }
       videoRef.current.play();
       setIsPlaying(true);
     }
   };
 
-  const setStartToCurrent = () => {
-    if (currentTime < endTime) {
-      setStartTime(parseFloat(currentTime.toFixed(2)));
-    }
+  const seekTo = (time: number) => {
+    if (!videoRef.current) return;
+    const clamped = Math.max(0, Math.min(duration, time));
+    videoRef.current.currentTime = clamped;
+    setCurrentTime(clamped);
   };
 
-  const setEndToCurrent = () => {
-    if (currentTime > startTime) {
-      setEndTime(parseFloat(currentTime.toFixed(2)));
+  const previewSegment = () => {
+    if (!videoRef.current) return;
+    videoRef.current.currentTime = startTime;
+    setCurrentTime(startTime);
+    videoRef.current.play();
+    setIsPlaying(true);
+  };
+
+  // Set start to current playhead
+  const setStartToCurrent = () => {
+    const current = videoRef.current ? videoRef.current.currentTime : currentTime;
+    const newStart = Math.max(0, parseFloat(current.toFixed(2)));
+    setStartTime(newStart);
+    // If start is after or equal to end, push end forward
+    if (newStart >= endTime) {
+      setEndTime(Math.min(duration, parseFloat((newStart + 1.0).toFixed(2))));
     }
+    seekTo(newStart);
+  };
+
+  // Set end to current playhead
+  const setEndToCurrent = () => {
+    const current = videoRef.current ? videoRef.current.currentTime : currentTime;
+    const newEnd = Math.min(duration, parseFloat(current.toFixed(2)));
+    setEndTime(newEnd);
+    // If end is before or equal to start, push start backward
+    if (newEnd <= startTime) {
+      setStartTime(Math.max(0, parseFloat((newEnd - 1.0).toFixed(2))));
+    }
+    seekTo(newEnd);
+  };
+
+  const handleStartTimeChange = (val: number) => {
+    const clamped = Math.max(0, Math.min(val, endTime - 0.1));
+    const cleanVal = parseFloat(clamped.toFixed(2));
+    setStartTime(cleanVal);
+    seekTo(cleanVal);
+  };
+
+  const handleEndTimeChange = (val: number) => {
+    const clamped = Math.max(startTime + 0.1, Math.min(duration, val));
+    const cleanVal = parseFloat(clamped.toFixed(2));
+    setEndTime(cleanVal);
+    seekTo(cleanVal);
+  };
+
+  // Quick preset helpers
+  const handleSelectAll = () => {
+    setStartTime(0);
+    setEndTime(duration);
+    seekTo(0);
+  };
+
+  const handleSelectFirstN = (seconds: number) => {
+    setStartTime(0);
+    setEndTime(Math.min(duration, seconds));
+    seekTo(0);
   };
 
   const handleTrim = async () => {
@@ -206,6 +268,9 @@ export const VideoTrimmerTab: React.FC = () => {
   };
 
   const selectedDuration = Math.max(0, endTime - startTime);
+  const startPercent = duration > 0 ? (startTime / duration) * 100 : 0;
+  const endPercent = duration > 0 ? (endTime / duration) * 100 : 100;
+  const currentPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
     <div className="space-y-6">
@@ -261,7 +326,7 @@ export const VideoTrimmerTab: React.FC = () => {
                 onLoadedMetadata={handleLoadedMetadata}
                 onTimeUpdate={handleTimeUpdate}
                 onEnded={() => setIsPlaying(false)}
-                className="w-full h-full object-contain"
+                className="w-full h-full object-contain cursor-pointer"
                 onClick={togglePlay}
               />
             )}
@@ -276,94 +341,260 @@ export const VideoTrimmerTab: React.FC = () => {
             </button>
 
             {/* Current Time Display Overlay */}
-            <div className="absolute bottom-3 left-3 px-3 py-1 rounded-lg bg-black/70 backdrop-blur-md text-xs font-mono text-white border border-white/10">
-              {formatDuration(currentTime)} / {formatDuration(duration)}
+            <div className="absolute bottom-3 left-3 px-3 py-1 rounded-lg bg-black/70 backdrop-blur-md text-xs font-mono text-white border border-white/10 flex items-center gap-2">
+              <span className="text-pink-400 font-bold">{formatDuration(currentTime)}</span>
+              <span className="text-slate-500">/</span>
+              <span>{formatDuration(duration)}</span>
             </div>
+
+            {/* Preview selection button overlay */}
+            <button
+              type="button"
+              onClick={previewSegment}
+              className="absolute bottom-3 right-3 px-3 py-1 rounded-lg bg-cyan-600/80 hover:bg-cyan-500 text-white backdrop-blur-md text-xs font-semibold flex items-center gap-1.5 shadow-lg transition-all"
+            >
+              <Play className="w-3 h-3" />
+              <span>Tester l'extrait</span>
+            </button>
           </div>
 
-          {/* Interactive Timeline Bar */}
-          <div className="space-y-3 max-w-3xl mx-auto">
-            <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
-              <span>Début : {formatDuration(startTime)}</span>
-              <span className="text-cyan-400 font-bold">
-                Durée sélectionnée : {formatDuration(selectedDuration)}
+          {/* Visual Dual-Range Timeline Bar */}
+          <div className="space-y-4 max-w-3xl mx-auto">
+            {/* Header info bar */}
+            <div className="flex items-center justify-between text-xs font-mono">
+              <span className="text-cyan-400 flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 inline-block" />
+                Début : <strong>{formatDuration(startTime)}</strong>
               </span>
-              <span>Fin : {formatDuration(endTime)}</span>
+              <div className="px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 font-bold text-xs">
+                Durée conservée : {formatDuration(selectedDuration)}
+              </div>
+              <span className="text-pink-400 flex items-center gap-1.5">
+                Fin : <strong>{formatDuration(endTime)}</strong>
+                <span className="w-2.5 h-2.5 rounded-full bg-pink-400 inline-block" />
+              </span>
             </div>
 
-            {/* Range Track with Visual In/Out handles */}
-            <div className="relative h-10 bg-slate-950 rounded-xl border border-slate-800 flex items-center px-2 select-none overflow-hidden">
-              {/* Active Selection Region Highlight */}
-              {duration > 0 && (
+            {/* Interactive Timeline Track */}
+            <div className="relative pt-6 pb-4">
+              <div
+                ref={timelineRef}
+                className="relative h-12 bg-slate-950 rounded-2xl border-2 border-slate-800 flex items-center select-none overflow-hidden"
+              >
+                {/* Active Selection Region Highlight */}
                 <div
-                  className="absolute top-0 bottom-0 bg-gradient-to-r from-cyan-500/30 to-indigo-500/30 border-x-2 border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.4)]"
+                  className="absolute top-0 bottom-0 bg-gradient-to-r from-cyan-500/30 via-indigo-500/25 to-pink-500/30 border-x-2 border-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.4)] transition-all pointer-events-none"
                   style={{
-                    left: `${(startTime / duration) * 100}%`,
-                    width: `${((endTime - startTime) / duration) * 100}%`,
+                    left: `${startPercent}%`,
+                    width: `${Math.max(1, endPercent - startPercent)}%`,
                   }}
                 />
-              )}
 
-              {/* Current Playhead cursor */}
-              {duration > 0 && (
+                {/* Current Playhead cursor */}
                 <div
-                  className="absolute top-0 bottom-0 w-0.5 bg-pink-400 z-10 shadow-[0_0_8px_rgba(244,114,182,1)]"
-                  style={{ left: `${(currentTime / duration) * 100}%` }}
-                />
-              )}
-
-              {/* Range sliders */}
-              <input
-                type="range"
-                min={0}
-                max={Math.max(0.1, duration)}
-                step={0.05}
-                value={startTime}
-                disabled={isProcessing}
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  if (val < endTime) {
-                    setStartTime(val);
-                    if (videoRef.current) videoRef.current.currentTime = val;
-                  }
-                }}
-                className="absolute inset-0 w-full opacity-0 cursor-pointer z-20 pointer-events-auto"
-                title="Début"
-              />
-            </div>
-
-            {/* Precise Time Buttons & Manual Inputs */}
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={setStartToCurrent}
-                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all hover:scale-105 active:scale-95"
+                  className="absolute top-0 bottom-0 w-1 bg-white z-20 shadow-[0_0_10px_rgba(255,255,255,1)] pointer-events-none"
+                  style={{ left: `${currentPercent}%` }}
                 >
-                  📍 Début à la position actuelle
-                </button>
-                <button
-                  type="button"
-                  onClick={setEndToCurrent}
-                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all hover:scale-105 active:scale-95"
+                  <div className="w-2.5 h-2.5 rounded-full bg-white -ml-[3px] -mt-1 shadow" />
+                </div>
+
+                {/* Left Start Handle Indicator */}
+                <div
+                  className="absolute top-0 bottom-0 flex items-center justify-center pointer-events-none z-30"
+                  style={{ left: `${startPercent}%` }}
                 >
-                  🏁 Fin à la position actuelle
-                </button>
+                  <div className="-ml-3 w-6 h-10 rounded-lg bg-cyan-500 border-2 border-white shadow-[0_0_12px_rgba(6,182,212,0.8)] flex items-center justify-center text-slate-950 font-black text-xs">
+                    [
+                  </div>
+                </div>
+
+                {/* Right End Handle Indicator */}
+                <div
+                  className="absolute top-0 bottom-0 flex items-center justify-center pointer-events-none z-30"
+                  style={{ left: `${endPercent}%` }}
+                >
+                  <div className="-ml-3 w-6 h-10 rounded-lg bg-pink-500 border-2 border-white shadow-[0_0_12px_rgba(236,72,153,0.8)] flex items-center justify-center text-white font-black text-xs">
+                    ]
+                  </div>
+                </div>
               </div>
 
-              {/* Fast cut toggle */}
-              <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-300">
+              {/* Slider 1: Start Time Slider */}
+              <div className="space-y-1.5 mt-3">
+                <div className="flex items-center justify-between text-xs text-slate-300">
+                  <span className="font-semibold text-cyan-400 flex items-center gap-1">
+                    <span>1. Curseur Début</span>
+                    <span className="font-mono text-cyan-300">({formatDuration(startTime)})</span>
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleStartTimeChange(startTime - 1)}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px]"
+                      title="-1 seconde"
+                    >
+                      -1s
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleStartTimeChange(startTime - 0.1)}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px]"
+                      title="-0.1 seconde"
+                    >
+                      -0.1s
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleStartTimeChange(startTime + 0.1)}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px]"
+                      title="+0.1 seconde"
+                    >
+                      +0.1s
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleStartTimeChange(startTime + 1)}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px]"
+                      title="+1 seconde"
+                    >
+                      +1s
+                    </button>
+                  </div>
+                </div>
                 <input
-                  type="checkbox"
-                  checked={fastCut}
-                  onChange={(e) => setFastCut(e.target.checked)}
-                  className="rounded border-slate-700 text-cyan-500 focus:ring-cyan-400"
+                  type="range"
+                  min={0}
+                  max={Math.max(0.1, duration)}
+                  step={0.05}
+                  value={startTime}
+                  disabled={isProcessing}
+                  onChange={(e) => handleStartTimeChange(parseFloat(e.target.value))}
+                  className="w-full h-2 rounded-lg bg-slate-800 accent-cyan-400 cursor-pointer"
                 />
-                <span className="flex items-center gap-1">
-                  <Zap className="w-3.5 h-3.5 text-amber-400" />
-                  Découpage instantané sans ré-encodage (Stream Copy)
-                </span>
-              </label>
+              </div>
+
+              {/* Slider 2: End Time Slider */}
+              <div className="space-y-1.5 mt-3">
+                <div className="flex items-center justify-between text-xs text-slate-300">
+                  <span className="font-semibold text-pink-400 flex items-center gap-1">
+                    <span>2. Curseur Fin</span>
+                    <span className="font-mono text-pink-300">({formatDuration(endTime)})</span>
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleEndTimeChange(endTime - 1)}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px]"
+                      title="-1 seconde"
+                    >
+                      -1s
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleEndTimeChange(endTime - 0.1)}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px]"
+                      title="-0.1 seconde"
+                    >
+                      -0.1s
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleEndTimeChange(endTime + 0.1)}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px]"
+                      title="+0.1 seconde"
+                    >
+                      +0.1s
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleEndTimeChange(endTime + 1)}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-[11px]"
+                      title="+1 seconde"
+                    >
+                      +1s
+                    </button>
+                  </div>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(0.1, duration)}
+                  step={0.05}
+                  value={endTime}
+                  disabled={isProcessing}
+                  onChange={(e) => handleEndTimeChange(parseFloat(e.target.value))}
+                  className="w-full h-2 rounded-lg bg-slate-800 accent-pink-500 cursor-pointer"
+                />
+              </div>
+            </div>
+
+            {/* Quick Action Buttons & Presets */}
+            <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                {/* Real-time capture buttons */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={setStartToCurrent}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-500/40 transition-all hover:scale-105 active:scale-95 shadow-sm"
+                  >
+                    <span>📍 Début à la position actuelle ({formatDuration(currentTime, false)})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={setEndToCurrent}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-pink-950/60 hover:bg-pink-900/80 text-pink-300 border border-pink-500/40 transition-all hover:scale-105 active:scale-95 shadow-sm"
+                  >
+                    <span>🏁 Fin à la position actuelle ({formatDuration(currentTime, false)})</span>
+                  </button>
+                </div>
+
+                {/* Presets */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-slate-500 mr-1">Raccourcis :</span>
+                  <button
+                    type="button"
+                    onClick={handleSelectAll}
+                    className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                  >
+                    Tout
+                  </button>
+                  {duration > 15 && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectFirstN(15)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                    >
+                      15s
+                    </button>
+                  )}
+                  {duration > 30 && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectFirstN(30)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                    >
+                      30s
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Fast Cut toggle */}
+              <div className="border-t border-slate-800/80 pt-2 flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={fastCut}
+                    onChange={(e) => setFastCut(e.target.checked)}
+                    className="rounded border-slate-700 text-cyan-500 focus:ring-cyan-400"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    Découpage instantané sans ré-encodage (Stream Copy - 0 perte de qualité)
+                  </span>
+                </label>
+              </div>
             </div>
           </div>
 
@@ -389,13 +620,13 @@ export const VideoTrimmerTab: React.FC = () => {
                 type="button"
                 onClick={handleTrim}
                 disabled={isProcessing || selectedDuration <= 0}
-                className="w-full flex items-center justify-center gap-2.5 py-3.5 px-6 rounded-2xl text-sm font-bold bg-gradient-to-r from-cyan-500 via-indigo-600 to-purple-600 hover:from-cyan-600 hover:via-indigo-700 hover:to-purple-700 text-white shadow-xl shadow-cyan-500/25 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2.5 py-4 px-6 rounded-2xl text-sm font-bold bg-gradient-to-r from-cyan-500 via-indigo-600 to-pink-600 hover:from-cyan-600 hover:via-indigo-700 hover:to-pink-700 text-white shadow-xl shadow-cyan-500/25 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 cursor-pointer"
               >
                 <Scissors className="w-4 h-4" />
                 <span>
                   {isProcessing
                     ? 'Découpage en cours...'
-                    : `Rogner la vidéo (${formatDuration(selectedDuration)})`}
+                    : `Rogner et extraire la vidéo (${formatDuration(selectedDuration)})`}
                 </span>
               </button>
             </div>
