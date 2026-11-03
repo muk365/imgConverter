@@ -64,28 +64,28 @@ class FFmpegService {
         this.progressListeners.forEach((l) => l(pct));
       });
 
+      // Try primary CDN (unpkg)
       try {
-        // Try local files first
-        const localBase = `${window.location.origin}/ffmpeg`;
+        const cdnBase = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
         await ffmpeg.load({
-          coreURL: await toBlobURL(`${localBase}/ffmpeg-core.js`, 'text/javascript'),
-          wasmURL: await toBlobURL(`${localBase}/ffmpeg-core.wasm`, 'application/wasm'),
+          coreURL: await toBlobURL(`${cdnBase}/ffmpeg-core.js`, 'text/javascript'),
+          wasmURL: await toBlobURL(`${cdnBase}/ffmpeg-core.wasm`, 'application/wasm'),
         });
         this.setStatus('ready', 'Moteur WebAssembly FFmpeg actif');
         return ffmpeg;
-      } catch (localErr) {
-        console.warn('Local FFmpeg load failed, attempting CDN fallback...', localErr);
+      } catch (unpkgErr) {
+        console.warn('unpkg FFmpeg load failed, attempting jsDelivr fallback...', unpkgErr);
         try {
-          // CDN fallback
-          const cdnBase = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+          // Secondary CDN fallback (jsdelivr)
+          const jsdelivrBase = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm';
           await ffmpeg.load({
-            coreURL: await toBlobURL(`${cdnBase}/ffmpeg-core.js`, 'text/javascript'),
-            wasmURL: await toBlobURL(`${cdnBase}/ffmpeg-core.wasm`, 'application/wasm'),
+            coreURL: await toBlobURL(`${jsdelivrBase}/ffmpeg-core.js`, 'text/javascript'),
+            wasmURL: await toBlobURL(`${jsdelivrBase}/ffmpeg-core.wasm`, 'application/wasm'),
           });
-          this.setStatus('ready', 'Moteur FFmpeg actif (via CDN)');
+          this.setStatus('ready', 'Moteur FFmpeg actif (via CDN jsDelivr)');
           return ffmpeg;
-        } catch (cdnErr: unknown) {
-          const err = cdnErr as Error;
+        } catch (fallbackErr: unknown) {
+          const err = fallbackErr as Error;
           this.setStatus('error', err?.message || 'Échec du chargement de FFmpeg');
           this.loadPromise = null;
           throw err;
